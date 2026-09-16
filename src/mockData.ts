@@ -41,10 +41,10 @@ export const MOCK_RESTAURANTS: Restaurant[] = [
   { id: 'r5', name: 'Tacos Mexico', location: 'Centro' },
 ];
 
-// Generar historial de órdenes (últimos 30 días)
+// Generar historial de órdenes (últimos 90 días)
 export const generateMockOrders = (): Order[] => {
   const orders: Order[] = [];
-  const daysToGenerate = 30;
+  const daysToGenerate = 90;
   
   for (let i = 0; i <= daysToGenerate; i++) {
     const currentDate = subDays(now, i);
