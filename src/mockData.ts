@@ -20,6 +20,7 @@ export interface Order {
   driverId: string;
   timestamp: Date;
   status: 'completed';
+  deliveryTimeMinutes: number;
 }
 
 const now = new Date();
@@ -69,12 +70,17 @@ export const generateMockOrders = (): Order[] => {
         }
       }
 
+      // Base delivery time per driver to simulate faster/slower drivers
+      const baseDriverTime = driver.id.charCodeAt(1) % 3 === 0 ? 30 : (driver.id.charCodeAt(1) % 2 === 0 ? 15 : 22);
+      const deliveryTimeMinutes = baseDriverTime + Math.floor(Math.random() * 20);
+
       orders.push({
         id: `o_${i}_${j}`,
         restaurantId,
         driverId: driver.id,
         timestamp: subHours(currentDate, Math.floor(Math.random() * 24)),
-        status: 'completed'
+        status: 'completed',
+        deliveryTimeMinutes
       });
     }
   }
