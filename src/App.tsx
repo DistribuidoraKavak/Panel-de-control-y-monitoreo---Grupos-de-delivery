@@ -1,29 +1,32 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid,
   LineChart, Line
 } from 'recharts';
 import { 
-  Activity, AlertTriangle, Clock, Search,
+  Activity, AlertTriangle, Clock, Search, Radio,
   Store, Users, CheckCircle, Package, ArrowUpRight, ArrowDownRight, MapPin,
-  Download, Calendar, ArrowLeft, ChevronUp, ChevronDown, Timer
+  Download, Calendar, ArrowLeft, ChevronUp, ChevronDown, Timer, Wifi, WifiOff
 } from 'lucide-react';
 import { 
-  format, differenceInDays, isAfter, isBefore, 
-  startOfDay, startOfWeek, startOfMonth, endOfDay,
+  format, differenceInDays, startOfDay, endOfDay,
+  startOfWeek, startOfMonth,
   subDays, subWeeks, subMonths, endOfWeek, endOfMonth,
   parseISO
 } from 'date-fns';
 import { es } from 'date-fns/locale';
 
-import { MOCK_DRIVERS, MOCK_ORDERS, MOCK_RESTAURANTS } from './mockData';
+import {
+  getDataSource, setDataSource, fetchDemoStats, fetchLiveStats,
+  fetchBackendStatus,
+  type DataSource, type StatsResponse, type BackendStatus
+} from './api';
 import './index.css';
 
 type Period = 'day' | 'week' | 'month' | 'custom';
 type Tab = 'overview' | 'restaurants' | 'drivers';
 type SortField = 'name' | 'orders' | 'lastActive' | 'avgTime' | 'status';
 
-// Helper to get initials and color for Avatar
 const getAvatarConfig = (name: string, id: string) => {
   const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
   const colors = ['#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#f43f5e'];
@@ -31,7 +34,6 @@ const getAvatarConfig = (name: string, id: string) => {
   return { initials, color: colors[charCodeSum % colors.length] };
 };
 
-// Preset date ranges
 const PRESETS = [
   { label: 'Ayer', getRange: () => { const y = subDays(new Date(), 1); return { s: startOfDay(y), e: endOfDay(y) }; }},
   { label: 'Última semana', getRange: () => { const now = new Date(); const start = startOfWeek(subWeeks(now, 1), { weekStartsOn: 1 }); return { s: start, e: endOfWeek(start, { weekStartsOn: 1 }) }; }},
@@ -45,7 +47,13 @@ export default function App() {
   const [customStart, setCustomStart] = useState<string>(format(subDays(new Date(), 7), 'yyyy-MM-dd'));
   const [customEnd, setCustomEnd] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
   const [showCustomPanel, setShowCustomPanel] = useState(false);
-  
+
+  // Data source: 'demo' (mock) | 'live' (backend API)
+  const [dataSource, setDataSourceState] = useState<DataSource>(getDataSource);
+  const [liveStats, setLiveStats] = useState<StatsResponse | null>(null);
+  const [backendStatus, setBackendStatus] = useState<BackendStatus | null>(null);
+  const [liveError, setLiveError] = useState(false);
+
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [scrolled, setScrolled] = useState(false);
   
@@ -75,13 +83,10 @@ export default function App() {
     else setShowCustomPanel(false);
   }, [period]);
 
-  // Time boundaries calculation - FIX: parse custom dates with parseISO to avoid TZ offset
+  // Time boundaries calculation
   const { startDate, endDate, prevStartDate, prevEndDate } = useMemo(() => {
-    let sDate: Date;
-    let eDate: Date = endOfDay(now);
-    let pSDate: Date;
-    let pEDate: Date;
-
+    const now = new Date();
+    let sDate: Date, eDate: Date = endOfDay(now), pSDate: Date, pEDate: Date;
     if (period === 'day') {
       sDate = startOfDay(now);
       pSDate = startOfDay(subDays(now, 1));
@@ -95,7 +100,6 @@ export default function App() {
       pSDate = startOfMonth(subMonths(now, 1));
       pEDate = endOfDay(subDays(sDate, 1));
     } else {
-      // FIX: use parseISO to prevent timezone shift (new Date("yyyy-MM-dd") is UTC-midnight which shifts day)
       sDate = startOfDay(parseISO(customStart));
       eDate = endOfDay(parseISO(customEnd));
       const diff = differenceInDays(eDate, sDate);
@@ -112,91 +116,91 @@ export default function App() {
     setPeriod('custom');
   };
 
-  // Main filters
-  const filteredOrders = useMemo(() => {
-    return MOCK_ORDERS.filter(o => isAfter(o.timestamp, startDate) && isBefore(o.timestamp, endDate));
-  }, [startDate, endDate]);
+  // ── Toggle data source ─────────────────────────────────────────────────────
+  const toggleDataSource = () => {
+    const next: DataSource = dataSource === 'demo' ? 'live' : 'demo';
+    setDataSource(next);
+    setDataSourceState(next);
+    setLiveStats(null);
+    setLiveError(false);
+  };
 
-  const prevFilteredOrders = useMemo(() => {
-    return MOCK_ORDERS.filter(o => isAfter(o.timestamp, prevStartDate) && isBefore(o.timestamp, prevEndDate));
-  }, [prevStartDate, prevEndDate]);
+  // ── Live data fetching ─────────────────────────────────────────────────────
+  const loadLiveStats = useCallback(async () => {
+    if (dataSource !== 'live') return;
+    const result = await fetchLiveStats(startDate, endDate, prevStartDate, prevEndDate);
+    if (result) {
+      setLiveStats(result);
+      setLiveError(false);
+    } else {
+      setLiveError(true);
+    }
+  }, [dataSource, startDate, endDate, prevStartDate, prevEndDate]);
 
-  // Derived Stats
-  const { 
-    restaurantStats, driverStats, 
-    totalOrders, prevTotalOrders, 
-    activeDriversCount, prevActiveDriversCount, 
-    alertDriversCount, inactiveRestaurantsCount,
-    ordersByDate
-  } = useMemo(() => {
-    
-    // Agrupar por restaurante
-    const rStats: Record<string, number> = {};
-    const pRStats: Record<string, number> = {};
-    filteredOrders.forEach(o => rStats[o.restaurantId] = (rStats[o.restaurantId] || 0) + 1);
-    prevFilteredOrders.forEach(o => pRStats[o.restaurantId] = (pRStats[o.restaurantId] || 0) + 1);
+  useEffect(() => { loadLiveStats(); }, [loadLiveStats]);
 
-    const rStatsArr = MOCK_RESTAURANTS.map(rest => {
-      const current = rStats[rest.id] || 0;
-      const prev = pRStats[rest.id] || 0;
-      const trend = prev === 0 ? (current > 0 ? 100 : 0) : Math.round(((current - prev) / prev) * 100);
-      return { ...rest, orders: current, prevOrders: prev, trend, isInactive: current === 0 && prev > 0 };
-    }).sort((a, b) => b.orders - a.orders);
+  // Poll backend status every 10s when in live mode
+  useEffect(() => {
+    if (dataSource !== 'live') { setBackendStatus(null); return; }
+    const check = async () => setBackendStatus(await fetchBackendStatus());
+    check();
+    const id = setInterval(check, 10000);
+    return () => clearInterval(id);
+  }, [dataSource]);
 
-    // Agrupar por repartidor y calcular tiempo promedio
-    const dStats: Record<string, number> = {};
-    const dTimes: Record<string, number[]> = {};
-    filteredOrders.forEach(o => {
-      dStats[o.driverId] = (dStats[o.driverId] || 0) + 1;
-      if (!dTimes[o.driverId]) dTimes[o.driverId] = [];
-      dTimes[o.driverId].push(o.deliveryTimeMinutes);
-    });
-    
-    const pDStats: Record<string, number> = {};
-    prevFilteredOrders.forEach(o => pDStats[o.driverId] = (pDStats[o.driverId] || 0) + 1);
+  // Auto-refresh live stats every 30s
+  useEffect(() => {
+    if (dataSource !== 'live') return;
+    const id = setInterval(loadLiveStats, 30000);
+    return () => clearInterval(id);
+  }, [dataSource, loadLiveStats]);
 
-    const dStatsArr = MOCK_DRIVERS.map(driver => {
-      const daysInactive = differenceInDays(now, driver.lastActive);
-      const times = dTimes[driver.id] || [];
-      const avgDeliveryTime = times.length > 0
-        ? Math.round(times.reduce((a, b) => a + b, 0) / times.length)
-        : null;
-      return {
-        ...driver,
-        orders: dStats[driver.id] || 0,
-        avgDeliveryTime,
-        daysInactive,
-        needsAlert: daysInactive >= 4
-      };
-    });
+  // ── Compute stats from the active data source ──────────────────────────────
+  const activeStats = useMemo(() => {
+    if (dataSource === 'live') return liveStats;
+    return fetchDemoStats(startDate, endDate, prevStartDate, prevEndDate);
+  }, [dataSource, liveStats, startDate, endDate, prevStartDate, prevEndDate]);
 
-    // FIX: sort dates chronologically using timestamp, not string key
+  const restaurantStats = activeStats?.restaurantStats ?? [];
+  const rawDriverStats = activeStats?.driverStats ?? [];
+  const rawOrders = activeStats?.orders ?? [];
+  const totalOrders = activeStats?.totalOrders ?? 0;
+  const driverStats = rawDriverStats.map(d => ({
+    ...d,
+    daysInactive: differenceInDays(now, new Date(d.last_active)),
+    needsAlert: differenceInDays(now, new Date(d.last_active)) >= 4,
+  }));
+
+  const prevTotalOrders = (() => {
+    if (dataSource === 'demo') {
+      return fetchDemoStats(prevStartDate, prevEndDate, prevStartDate, prevEndDate).totalOrders;
+    }
+    return 0; // live mode handles this inside fetchLiveStats
+  })();
+
+  const prevActiveDriversCount = 0; // best-effort, see api.ts for live handling
+  const activeDriversCount = driverStats.filter(d => !d.needsAlert).length;
+  const alertDriversCount = driverStats.filter(d => d.needsAlert).length;
+  const inactiveRestaurantsCount = restaurantStats.filter(r => r.isInactive || (r.trend ?? 0) <= -50).length;
+
+  // Build chronologically sorted day-by-day chart data
+  const ordersByDate = useMemo(() => {
     const dateMap: Record<string, { ts: number; pedidos: number }> = {};
-    filteredOrders.forEach(o => {
-      const dateKey = format(o.timestamp, 'yyyy-MM-dd'); // sortable ISO key
-      if (!dateMap[dateKey]) dateMap[dateKey] = { ts: startOfDay(o.timestamp).getTime(), pedidos: 0 };
-      dateMap[dateKey].pedidos++;
+    rawOrders.forEach(o => {
+      const ts = new Date(o.timestamp);
+      const k = format(ts, 'yyyy-MM-dd');
+      if (!dateMap[k]) dateMap[k] = { ts: startOfDay(ts).getTime(), pedidos: 0 };
+      dateMap[k].pedidos++;
     });
-    const ordersByDateArr = Object.values(dateMap)
+    return Object.values(dateMap)
       .sort((a, b) => a.ts - b.ts)
       .map(v => ({ date: format(new Date(v.ts), 'dd MMM'), pedidos: v.pedidos }));
+  }, [rawOrders]);
 
-    return {
-      restaurantStats: rStatsArr,
-      driverStats: dStatsArr,
-      totalOrders: filteredOrders.length,
-      prevTotalOrders: prevFilteredOrders.length,
-      activeDriversCount: Object.keys(dStats).length,
-      prevActiveDriversCount: Object.keys(pDStats).length,
-      alertDriversCount: dStatsArr.filter(d => d.needsAlert).length,
-      inactiveRestaurantsCount: rStatsArr.filter(r => r.isInactive || r.trend <= -50).length,
-      ordersByDate: ordersByDateArr
-    };
-  }, [filteredOrders, prevFilteredOrders]);
 
   // Insights automáticos
   const autoInsight = useMemo(() => {
-    if (totalOrders === 0) return "No hay actividad registrada en este período.";
+    if (totalOrders === 0 || restaurantStats.length === 0 || driverStats.length === 0) return "No hay actividad registrada en este período.";
     const topRest = restaurantStats[0];
     const topDriver = driverStats.slice().sort((a, b) => b.orders - a.orders)[0];
     const fastestDriver = driverStats.filter(d => d.avgDeliveryTime !== null)
@@ -217,7 +221,7 @@ export default function App() {
       let valA: string | number, valB: string | number;
       if (sortField === 'name') { valA = a.name; valB = b.name; }
       else if (sortField === 'orders') { valA = a.orders; valB = b.orders; }
-      else if (sortField === 'lastActive') { valA = a.lastActive.getTime(); valB = b.lastActive.getTime(); }
+      else if (sortField === 'lastActive') { valA = new Date(a.last_active).getTime(); valB = new Date(b.last_active).getTime(); }
       else if (sortField === 'avgTime') { valA = a.avgDeliveryTime ?? 9999; valB = b.avgDeliveryTime ?? 9999; }
       else { // status
         if (a.needsAlert !== b.needsAlert) return sortAsc ? (a.needsAlert ? 1 : -1) : (a.needsAlert ? -1 : 1);
@@ -241,10 +245,10 @@ export default function App() {
   // Exportar reporte CSV
   const exportCSV = () => {
     const headers = ['ID Pedido', 'Restaurante', 'Repartidor', 'Fecha', 'Tiempo Entrega (min)', 'Estado'];
-    const rows = filteredOrders.map(o => {
-      const rName = MOCK_RESTAURANTS.find(r => r.id === o.restaurantId)?.name || 'N/A';
-      const dName = MOCK_DRIVERS.find(d => d.id === o.driverId)?.name || 'N/A';
-      return [o.id, rName, dName, format(o.timestamp, 'yyyy-MM-dd HH:mm'), o.deliveryTimeMinutes, o.status];
+    const rows = rawOrders.map(o => {
+      const rName = restaurantStats.find(r => r.id === o.restaurantId)?.name || 'N/A';
+      const dName = driverStats.find(d => d.id === o.driverId)?.name || 'N/A';
+      return [o.id, rName, dName, format(new Date(o.timestamp), 'yyyy-MM-dd HH:mm'), o.deliveryTimeMinutes, o.status];
     });
     const csvContent = "data:text/csv;charset=utf-8," 
       + headers.join(",") + "\n" 
@@ -273,12 +277,13 @@ export default function App() {
   // ---- DETAIL VIEWS ----
   if (selectedRestaurantId) {
     const rest = restaurantStats.find(r => r.id === selectedRestaurantId)!;
-    const rOrders = filteredOrders.filter(o => o.restaurantId === selectedRestaurantId);
+    const rOrders = rawOrders.filter(o => o.restaurantId === selectedRestaurantId);
     
     const dMap: Record<string, { ts: number; pedidos: number }> = {};
     rOrders.forEach(o => {
-      const k = format(o.timestamp, 'yyyy-MM-dd');
-      if (!dMap[k]) dMap[k] = { ts: startOfDay(o.timestamp).getTime(), pedidos: 0 };
+      const ts = new Date(o.timestamp);
+      const k = format(ts, 'yyyy-MM-dd');
+      if (!dMap[k]) dMap[k] = { ts: startOfDay(ts).getTime(), pedidos: 0 };
       dMap[k].pedidos++;
     });
     const rChartData = Object.values(dMap).sort((a,b) => a.ts - b.ts).map(v => ({ date: format(new Date(v.ts), 'dd MMM'), pedidos: v.pedidos }));
@@ -286,7 +291,7 @@ export default function App() {
     const dCount: Record<string, number> = {};
     rOrders.forEach(o => dCount[o.driverId] = (dCount[o.driverId] || 0) + 1);
     const topDrivers = Object.keys(dCount)
-      .map(id => ({ driver: MOCK_DRIVERS.find(d => d.id === id)!, count: dCount[id] }))
+      .map(id => ({ driver: driverStats.find(d => d.id === id) ?? { id, name: id, phone: '' }, count: dCount[id] }))
       .sort((a,b) => b.count - a.count).slice(0, 5);
 
     return (
@@ -336,14 +341,15 @@ export default function App() {
 
   if (selectedDriverId) {
     const driver = driverStats.find(d => d.id === selectedDriverId)!;
-    const dOrders = filteredOrders.filter(o => o.driverId === selectedDriverId);
+    const dOrders = rawOrders.filter(o => o.driverId === selectedDriverId);
     
     const dMap: Record<string, { ts: number; pedidos: number; totalTime: number }> = {};
     dOrders.forEach(o => {
-      const k = format(o.timestamp, 'yyyy-MM-dd');
-      if (!dMap[k]) dMap[k] = { ts: startOfDay(o.timestamp).getTime(), pedidos: 0, totalTime: 0 };
+      const ts = new Date(o.timestamp);
+      const k = format(ts, 'yyyy-MM-dd');
+      if (!dMap[k]) dMap[k] = { ts: startOfDay(ts).getTime(), pedidos: 0, totalTime: 0 };
       dMap[k].pedidos++;
-      dMap[k].totalTime += o.deliveryTimeMinutes;
+      dMap[k].totalTime += (o.deliveryTimeMinutes ?? 0);
     });
     const dChartData = Object.values(dMap).sort((a,b) => a.ts - b.ts).map(v => ({
       date: format(new Date(v.ts), 'dd MMM'),
@@ -354,7 +360,7 @@ export default function App() {
     const rCount: Record<string, number> = {};
     dOrders.forEach(o => rCount[o.restaurantId] = (rCount[o.restaurantId] || 0) + 1);
     const topRests = Object.keys(rCount)
-      .map(id => ({ rest: MOCK_RESTAURANTS.find(r => r.id === id)!, count: rCount[id] }))
+      .map(id => ({ rest: restaurantStats.find(r => r.id === id) ?? { id, name: id, location: '' }, count: rCount[id] }))
       .sort((a,b) => b.count - a.count).slice(0, 5);
 
     const { initials, color } = getAvatarConfig(driver.name, driver.id);
@@ -448,6 +454,53 @@ export default function App() {
           <button className={`nav-item ${activeTab === 'restaurants' ? 'active' : ''}`} onClick={() => setActiveTab('restaurants')}><Store size={18}/> Locales y Volumen</button>
           <button className={`nav-item ${activeTab === 'drivers' ? 'active' : ''}`} onClick={() => setActiveTab('drivers')}><Users size={18}/> Equipo de Reparto</button>
         </nav>
+
+        {/* Data Source Toggle */}
+        <div style={{ marginTop: 'auto', padding: '16px 0', borderTop: '1px solid var(--border-light)' }}>
+          <button
+            onClick={toggleDataSource}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', padding: '12px', borderRadius: 'var(--radius-md)', border: `1px solid ${dataSource === 'live' ? 'var(--status-success-border)' : 'var(--border-light)'}`, background: dataSource === 'live' ? 'var(--status-success-bg)' : 'var(--bg-app)', cursor: 'pointer', transition: 'all 0.2s' }}
+            title={dataSource === 'live' ? 'Cambiar a datos de demostración' : 'Cambiar a datos reales (requiere backend)'}
+          >
+            {dataSource === 'live'
+              ? <Wifi size={18} color="var(--status-success)"/>
+              : <WifiOff size={18} color="var(--text-muted)"/>
+            }
+            <div style={{ textAlign: 'left' }}>
+              <p style={{ fontSize: '0.8rem', fontWeight: 600, color: dataSource === 'live' ? 'var(--status-success-text)' : 'var(--text-muted)' }}>
+                {dataSource === 'live' ? 'Datos en vivo' : 'Modo demo'}
+              </p>
+              <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '1px' }}>
+                {dataSource === 'live' ? 'Clic para usar demo' : 'Clic para conectar'}
+              </p>
+            </div>
+          </button>
+
+          {/* WhatsApp connection status (solo en modo live) */}
+          {dataSource === 'live' && (
+            <div style={{ marginTop: '10px', padding: '10px 12px', borderRadius: 'var(--radius-md)', background: 'var(--bg-app)', border: '1px solid var(--border-light)', fontSize: '0.78rem' }}>
+              {liveError && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--status-danger)' }}>
+                  <AlertTriangle size={14}/> Backend no disponible
+                </div>
+              )}
+              {!liveError && backendStatus && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: backendStatus.whatsapp === 'ready' ? 'var(--status-success)' : 'var(--status-warning)', fontWeight: 500 }}>
+                    <Radio size={14}/>
+                    WhatsApp: {backendStatus.whatsapp === 'ready' ? 'Conectado' : backendStatus.whatsapp === 'waiting_qr' ? 'Esperando QR' : backendStatus.whatsapp}
+                  </div>
+                  <p style={{ color: 'var(--text-muted)', marginTop: '4px' }}>
+                    Modo: {backendStatus.logOnly ? 'Solo registro' : 'Completo'}
+                  </p>
+                </div>
+              )}
+              {!liveError && !backendStatus && (
+                <div style={{ color: 'var(--text-muted)' }}>Conectando al backend...</div>
+              )}
+            </div>
+          )}
+        </div>
       </aside>
 
       <main id="main-content" className="main-content">
@@ -562,12 +615,12 @@ export default function App() {
                     </div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      {restaurantStats.filter(r => r.isInactive || r.trend <= -50).map(r => (
+                      {restaurantStats.filter(r => r.isInactive || (r.trend ?? 0) <= -50).map(r => (
                         <div key={r.id} onClick={() => setSelectedRestaurantId(r.id)} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', backgroundColor: 'var(--status-warning-bg)', borderRadius: 'var(--radius-md)', cursor: 'pointer' }}>
                           <div className="avatar" style={{ backgroundColor: 'var(--status-warning)' }}><Store size={16}/></div>
                           <div style={{ flex: 1 }}>
                             <p style={{ fontWeight: 600, color: 'var(--status-warning-text)' }}>{r.name}</p>
-                            <p style={{ fontSize: '0.8rem', color: 'var(--status-warning-text)', opacity: 0.8 }}>Caída del {Math.abs(r.trend)}% en volumen</p>
+                            <p style={{ fontSize: '0.8rem', color: 'var(--status-warning-text)', opacity: 0.8 }}>Caída del {Math.abs(r.trend ?? 0)}% en volumen</p>
                           </div>
                         </div>
                       ))}
@@ -635,7 +688,7 @@ export default function App() {
                             <MapPin size={14} color="var(--text-muted)"/>
                             <span style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--brand-700)' }}>{rest.name.split(' ')[0]}</span>
                           </div>
-                          {renderTrend(rest.orders, rest.prevOrders)}
+                          {renderTrend(rest.orders, rest.prevOrders ?? 0)}
                         </div>
                       ))}
                     </div>
@@ -706,7 +759,7 @@ export default function App() {
                             </td>
                             <td>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: driver.needsAlert ? 'var(--status-danger)' : 'var(--text-body)' }}>
-                                <Clock size={14}/>{format(driver.lastActive, "d MMM, HH:mm", { locale: es })}
+                                <Clock size={14}/>{format(new Date(driver.last_active), "d MMM, HH:mm", { locale: es })}
                               </div>
                             </td>
                             <td>

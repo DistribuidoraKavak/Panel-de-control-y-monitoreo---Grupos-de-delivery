@@ -1,0 +1,12 @@
+# ─── Sesión de WhatsApp (NO subir a git) ───────────────────────────
+.wwebjs_auth/
+.wwebjs_cache/
+
+# ─── Base de datos (NO subir a git, tiene datos reales) ─────────────
+data/
+
+# ─── Variables de entorno ──────────────────────────────────────────
+.env
+
+# ─── Dependencias ──────────────────────────────────────────────────
+node_modules/
