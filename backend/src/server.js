@@ -16,7 +16,7 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const express = require('express');
 const cors = require('cors');
-const { stmts } = require('./db');
+const { stmts, initDb } = require('./db');
 const { processMessage } = require('./parser');
 
 // ── Configuración ─────────────────────────────────────────────────────────────
@@ -178,7 +178,7 @@ client.on('message_create', async (msg) => {
 });
 
 // Inicializar cliente
-client.initialize();
+// client.initialize() ahora se llama después de initDb()
 
 // ── API REST ──────────────────────────────────────────────────────────────────
 const app = express();
@@ -283,13 +283,20 @@ app.get('/api/stats', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`\n🚀 API disponible en http://localhost:${PORT}`);
-  console.log(`   Endpoints:`);
-  console.log(`   GET /api/status        → estado de conexión WhatsApp`);
-  console.log(`   GET /api/events        → log crudo de mensajes detectados`);
-  console.log(`   GET /api/orders        → pedidos registrados`);
-  console.log(`   GET /api/drivers       → repartidores conocidos`);
-  console.log(`   GET /api/restaurants   → restaurantes conocidos`);
-  console.log(`   GET /api/stats         → estadísticas agregadas para el panel\n`);
+initDb().then(() => {
+  client.initialize();
+
+  app.listen(PORT, () => {
+    console.log(`\n🚀 API disponible en http://localhost:${PORT}`);
+    console.log(`   Endpoints:`);
+    console.log(`   GET /api/status        → estado de conexión WhatsApp`);
+    console.log(`   GET /api/events        → log crudo de mensajes detectados`);
+    console.log(`   GET /api/orders        → pedidos registrados`);
+    console.log(`   GET /api/drivers       → repartidores conocidos`);
+    console.log(`   GET /api/restaurants   → restaurantes conocidos`);
+    console.log(`   GET /api/stats         → estadísticas agregadas para el panel\n`);
+  });
+}).catch(e => {
+  console.error('❌ Error inicializando DB:', e);
 });
+
