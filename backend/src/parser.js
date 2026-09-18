@@ -11,18 +11,7 @@
 
 const { stmts } = require('./db');
 
-// ── Patrones de texto ─────────────────────────────────────────────────────────
 
-// "yo" — respuesta de repartidor disponible
-// Acepta: "yo", "Yo", "YO", "yo!", "yo.", "yo " etc., pero no "yo soy" ni "ayola"
-const RE_YO = /^\s*yo[.!¡\s]*$/i;
-
-// "dale" — confirmación del administrador
-const RE_DALE = /^\s*dale[.!¡\s]*$/i;
-
-// Señales de disponibilidad en el grupo de comunidad
-const RE_ACTIVO = /\b(activo|disponible|conecto|conectado|estoy|arranco|listo)\b/i;
-const RE_INACTIVO = /\b(inactivo|no estoy|descans|me voy|ya fue|corto|salgo|hasta)\b/i;
 
 // ── ID de pedido ──────────────────────────────────────────────────────────────
 let orderCounter = 0;
@@ -33,119 +22,111 @@ const generateOrderId = () => {
 
 // ── Procesador principal ──────────────────────────────────────────────────────
 
+function cleanText(text) {
+  // Remover caracteres invisibles y limpiar espacios
+  return text.replace(/[\u200B-\u200D\uFEFF\u200E\u200F]/g, '').trim();
+}
+
 /**
  * Procesa un mensaje de WhatsApp y actualiza la base de datos si corresponde.
- *
- * @param {object} msg         — mensaje de whatsapp-web.js
- * @param {string} groupType   — 'restaurantes' | 'comunidad'
- * @param {boolean} logOnly    — si true, solo registra eventos (Fase 1)
  */
 async function processMessage(msg, groupType, logOnly) {
   const timestamp = new Date(msg.timestamp * 1000).toISOString();
-  const senderId = msg.author || msg.from; // author en grupos, from en 1-a-1
+  const senderId = msg.author || msg.from; 
   const senderName = msg._data?.notifyName || msg._data?.pushName || null;
+
+  // Ignorar mensajes eliminados
+  if (msg.type === 'revoked' || msg.type === 'e2e_notification') return;
 
   // ── GRUPO RESTAURANTES ─────────────────────────────────────────────────────
   if (groupType === 'restaurantes') {
+    const body = cleanText(msg.body || '');
+    const mentionedIds = msg.mentionedIds || [];
+    const hasMention = mentionedIds.length > 0;
 
-    // 1. STICKER → nuevo pedido
-    if (msg.type === 'sticker') {
-      logEvent('sticker', groupType, msg.from, senderId, senderName, '[sticker]', timestamp, msg);
+    // "YO" - Reclamo de pedido
+    // Regex flexible: permite emojis, repeticiones de letras, pero rechaza nombres que contienen "yo" adentro.
+    const RE_YO = /^\s*([^a-z0-9]*)(y+o+|v+o+y+|m+i+o+|y+o+\s+v+o+y+)([^a-z0-9]*)\s*$/i;
+    const isYo = RE_YO.test(body);
 
+    // "DALE" - Confirmación del administrador
+    const RE_DALE = /^\s*([^a-z0-9]*)(d+a+l+e+|o+k+|c+o+n+f+i+r+m+a+d+o+)([^a-z0-9]*)\s*$/i;
+    const isConfirmText = RE_DALE.test(body);
+    const isConfirm = isConfirmText || hasMention;
+
+    // "ENTREGADO" - Señal de entrega
+    const RE_ENTREGADO = /\b(entregad[oa]s?|listo|ok repartidor|lleg[oó]|entreg[oó]|dejado)\b/i;
+    const isDelivery = RE_ENTREGADO.test(body) && !isYo && !isConfirmText;
+
+    // Inferir roles basados en la base de datos (historial)
+    const knownDriver = stmts.getDriver(senderId);
+    const knownRestaurant = stmts.getRestaurant(senderId);
+
+    // Detección de "Nuevo Pedido" (Cualquier mensaje no-comando de alguien que no es repartidor conocido)
+    let isNewOrder = false;
+    if (!isYo && !isConfirm && !isDelivery && msg.type !== 'location') {
+      if (msg.type === 'sticker' || msg.type === 'image') {
+        isNewOrder = true;
+      } else if (msg.type === 'chat') {
+        // Si ya es un restaurante conocido o es alguien nuevo (asumimos restaurante por defecto)
+        if (knownRestaurant || !knownDriver) {
+          isNewOrder = true;
+        }
+      }
+    }
+
+    // 1. NUEVO PEDIDO
+    if (isNewOrder) {
+      logEvent('nuevo_pedido', groupType, msg.from, senderId, senderName, msg.type, timestamp, msg);
       if (!logOnly) {
-        // Registrar el restaurante
         stmts.upsertRestaurant({
-          id: senderId,
-          name: senderName,
-          phone: senderId.split('@')[0],
-          group_id: msg.from,
-          first_seen: timestamp,
-          last_seen: timestamp,
+          id: senderId, name: senderName, phone: senderId.split('@')[0], group_id: msg.from,
+          first_seen: timestamp, last_seen: timestamp,
         });
-
-        // Crear el pedido
         const orderId = generateOrderId();
-        stmts.insertOrder({
-          id: orderId,
-          restaurant_id: senderId,
-          created_at: timestamp,
-          group_id: msg.from,
-        });
-
+        stmts.insertOrder({ id: orderId, restaurant_id: senderId, created_at: timestamp, group_id: msg.from });
         console.log(`[PEDIDO NUEVO] ID: ${orderId} | Local: ${senderName || senderId}`);
-      } else {
-        console.log(`[LOG] STICKER de ${senderName || senderId} — indicaría nuevo pedido`);
       }
       return;
     }
 
     // 2. "YO" → repartidor disponible
-    const body = (msg.body || '').trim();
-    if (msg.type === 'chat' && RE_YO.test(body)) {
+    if (msg.type === 'chat' && isYo) {
       logEvent('yo', groupType, msg.from, senderId, senderName, body, timestamp, msg);
-
       if (!logOnly) {
-        // Registrar el repartidor
-        stmts.upsertDriver({
-          id: senderId,
-          name: senderName,
-          phone: senderId.split('@')[0],
-          last_active: timestamp,
-          first_seen: timestamp,
-        });
-
-        // Buscar el pedido pendiente más reciente
+        stmts.upsertDriver({ id: senderId, name: senderName, phone: senderId.split('@')[0], last_active: timestamp, first_seen: timestamp });
         const pendingOrder = stmts.getLastPendingOrder();
         if (pendingOrder) {
-          // Verificar si ya respondió antes (evitar duplicados)
           const existingResp = stmts.getResponseForOrderDriver(pendingOrder.id, senderId);
-
           if (!existingResp) {
-            // ¿Es el primero? → ganador potencial
             const prevResponses = stmts.countResponsesForOrder(pendingOrder.id);
             const isFirst = (prevResponses?.cnt || 0) === 0;
-
-            stmts.insertResponse({
-              order_id: pendingOrder.id,
-              driver_id: senderId,
-              responded_at: timestamp,
-              won: isFirst ? 1 : 0,
-            });
-
+            stmts.insertResponse({ order_id: pendingOrder.id, driver_id: senderId, responded_at: timestamp, won: isFirst ? 1 : 0 });
             if (isFirst) {
-              // Asignar provisionalmente al primer "yo"
-              stmts.assignOrder({
-                id: pendingOrder.id,
-                driver_id: senderId,
-                assigned_at: timestamp,
-              });
-              console.log(`[ASIGNADO PROVISIONAL] Pedido ${pendingOrder.id} → ${senderName || senderId} (primer "yo")`);
-            } else {
-              console.log(`[YO] ${senderName || senderId} respondió (no primero) al pedido ${pendingOrder.id}`);
+              stmts.assignOrder({ id: pendingOrder.id, driver_id: senderId, assigned_at: timestamp });
+              console.log(`[ASIGNADO PROVISIONAL] Pedido ${pendingOrder.id} → ${senderName || senderId}`);
             }
           }
-        } else {
-          console.log(`[YO] ${senderName || senderId} dijo "yo" pero no hay pedido pendiente activo`);
         }
-      } else {
-        console.log(`[LOG] "YO" de ${senderName || senderId}`);
       }
       return;
     }
 
-    // 3. "DALE" → confirmación del admin
-    if (msg.type === 'chat' && RE_DALE.test(body)) {
+    // 3. CONFIRMACIÓN ("DALE" o "@Mencion")
+    if (msg.type === 'chat' && isConfirm) {
       logEvent('dale', groupType, msg.from, senderId, senderName, body, timestamp, msg);
-
       if (!logOnly) {
-        const assignedOrder = stmts.getLastAssignedOrder();
-        if (assignedOrder) {
-          console.log(`[DALE] Admin ${senderName || senderId} confirmó pedido ${assignedOrder.id}`);
-          // El pedido ya fue asignado al primer "yo", el "dale" confirma
-          // (no necesitamos cambiar el driver_id porque ya está asignado al primero)
+        const targetOrder = stmts.getLastAssignedOrder() || stmts.getLastPendingOrder();
+        if (targetOrder) {
+          if (hasMention) {
+            // Confirmación explícita a un repartidor específico
+            const driverToAssign = mentionedIds[0];
+            stmts.assignOrder({ id: targetOrder.id, driver_id: driverToAssign, assigned_at: timestamp });
+            console.log(`[CONFIRMADO MENCION] Admin asignó explicitamente a ${driverToAssign} al pedido ${targetOrder.id}`);
+          } else {
+            console.log(`[CONFIRMADO] Admin confirmó pedido ${targetOrder.id}`);
+          }
         }
-      } else {
-        console.log(`[LOG] "DALE" de ${senderName || senderId}`);
       }
       return;
     }
@@ -153,28 +134,32 @@ async function processMessage(msg, groupType, logOnly) {
     // 4. LOCATION → ubicación del local enviada al repartidor
     if (msg.type === 'location') {
       logEvent('location', groupType, msg.from, senderId, senderName, '[location]', timestamp, msg);
-
       if (!logOnly) {
         const assignedOrder = stmts.getLastAssignedOrder();
         if (assignedOrder) {
           stmts.dispatchOrder({ id: assignedOrder.id, dispatched_at: timestamp });
           console.log(`[UBICACIÓN] Pedido ${assignedOrder.id} → en camino`);
         }
-      } else {
-        console.log(`[LOG] LOCATION de ${senderName || senderId}`);
       }
       return;
     }
 
-    // 5. Señales de entrega completada (best-effort)
-    const RE_ENTREGADO = /\b(entregado|listo|ok repartidor|llegó|llego|entregó|entrego)\b/i;
-    if (msg.type === 'chat' && RE_ENTREGADO.test(body)) {
+    // 5. ENTREGADO → Señal de entrega completada
+    if (msg.type === 'chat' && isDelivery) {
       logEvent('delivery_signal', groupType, msg.from, senderId, senderName, body, timestamp, msg);
       if (!logOnly) {
-        const dispatchedOrder = stmts.getLastDispatchedOrder();
-        if (dispatchedOrder) {
-          stmts.completeOrder({ id: dispatchedOrder.id, completed_at: timestamp });
-          console.log(`[COMPLETADO] Pedido ${dispatchedOrder.id}`);
+        // Un repartidor puede tener múltiples pedidos. Completamos el más antiguo que esté despachado.
+        const oldestDispatched = stmts.getOldestDispatchedOrderForDriver(senderId);
+        if (oldestDispatched) {
+          stmts.completeOrder({ id: oldestDispatched.id, completed_at: timestamp });
+          console.log(`[COMPLETADO] Pedido ${oldestDispatched.id}`);
+        } else {
+          // Fallback: si no hay despachados, quizás nunca se envió la location. Completamos el más antiguo asignado.
+          const oldestAssigned = stmts.getOldestAssignedOrderForDriver(senderId);
+          if (oldestAssigned) {
+            stmts.completeOrder({ id: oldestAssigned.id, completed_at: timestamp });
+            console.log(`[COMPLETADO FALLBACK] Pedido ${oldestAssigned.id}`);
+          }
         }
       }
       return;
@@ -183,7 +168,9 @@ async function processMessage(msg, groupType, logOnly) {
 
   // ── GRUPO COMUNIDAD ────────────────────────────────────────────────────────
   if (groupType === 'comunidad') {
-    const body = (msg.body || '').trim();
+    const body = cleanText(msg.body || '');
+    const RE_ACTIVO = /\b(activo|disponible|conecto|conectado|estoy|arranco|listo)\b/i;
+    const RE_INACTIVO = /\b(inactivo|no estoy|descans|me voy|ya fue|corto|salgo|hasta)\b/i;
 
     if (msg.type === 'chat' && (RE_ACTIVO.test(body) || RE_INACTIVO.test(body))) {
       const signalType = RE_ACTIVO.test(body) ? 'activo' : 'inactivo';

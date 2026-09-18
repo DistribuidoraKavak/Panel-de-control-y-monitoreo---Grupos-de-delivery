@@ -183,6 +183,10 @@ const stmts = {
 
   getLastPendingOrder: () => get(`SELECT * FROM orders WHERE status='pending' ORDER BY created_at DESC LIMIT 1`),
   getLastAssignedOrder: () => get(`SELECT * FROM orders WHERE status='assigned' ORDER BY assigned_at DESC LIMIT 1`),
+  getOldestDispatchedOrderForDriver: (driverId) => get(`SELECT * FROM orders WHERE status='dispatched' AND driver_id=:did ORDER BY dispatched_at ASC LIMIT 1`, { ':did': driverId }),
+  getOldestAssignedOrderForDriver: (driverId) => get(`SELECT * FROM orders WHERE status='assigned' AND driver_id=:did ORDER BY assigned_at ASC LIMIT 1`, { ':did': driverId }),
+  getDriver: (id) => get(`SELECT * FROM drivers WHERE id=:id`, { ':id': id }),
+  getRestaurant: (id) => get(`SELECT * FROM restaurants WHERE id=:id`, { ':id': id }),
 
   // Queries de consulta para la API
   getOrders: (since, until) => all(`
