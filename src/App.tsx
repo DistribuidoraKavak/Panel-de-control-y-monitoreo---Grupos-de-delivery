@@ -27,10 +27,12 @@ type Period = 'day' | 'week' | 'month' | 'custom';
 type Tab = 'overview' | 'restaurants' | 'drivers';
 type SortField = 'name' | 'orders' | 'lastActive' | 'avgTime' | 'status';
 
-const getAvatarConfig = (name: string, id: string) => {
-  const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+const getAvatarConfig = (name: string | undefined | null, id: string | undefined | null) => {
+  const safeName = name || 'Desconocido';
+  const safeId = id || '0';
+  const initials = safeName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
   const colors = ['#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#f43f5e'];
-  const charCodeSum = id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const charCodeSum = safeId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
   return { initials, color: colors[charCodeSum % colors.length] };
 };
 
@@ -206,8 +208,8 @@ export default function App() {
     const fastestDriver = driverStats.filter(d => d.avgDeliveryTime !== null)
       .sort((a, b) => (a.avgDeliveryTime ?? 999) - (b.avgDeliveryTime ?? 999))[0];
     const percent = Math.round((topRest.orders / totalOrders) * 100);
-    let text = `${topRest.name} concentró el ${percent}% de los pedidos del período y ${topDriver.name} fue el repartidor más activo con ${topDriver.orders} entregas.`;
-    if (fastestDriver?.avgDeliveryTime) text += ` El más rápido fue ${fastestDriver.name} con un promedio de ${fastestDriver.avgDeliveryTime} min.`;
+    let text = `${topRest.name || 'Desconocido'} concentró el ${percent}% de los pedidos del período y ${topDriver.name || 'Desconocido'} fue el repartidor más activo con ${topDriver.orders} entregas.`;
+    if (fastestDriver?.avgDeliveryTime) text += ` El más rápido fue ${fastestDriver.name || 'Desconocido'} con un promedio de ${fastestDriver.avgDeliveryTime} min.`;
     return text;
   }, [totalOrders, restaurantStats, driverStats]);
 
@@ -215,7 +217,7 @@ export default function App() {
   const displayDrivers = useMemo(() => {
     let result = [...driverStats];
     if (searchQuery) {
-      result = result.filter(d => d.name.toLowerCase().includes(searchQuery.toLowerCase()));
+      result = result.filter(d => (d.name || 'Desconocido').toLowerCase().includes(searchQuery.toLowerCase()));
     }
     result.sort((a, b) => {
       let valA: string | number, valB: string | number;
@@ -668,7 +670,7 @@ export default function App() {
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={restaurantStats} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-light)"/>
-                        <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => val.split(' ')[0]}/>
+                        <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => (val || 'Desc.').split(' ')[0]}/>
                         <YAxis stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false}/>
                         <Tooltip cursor={{ fill: 'var(--bg-surface-hover)' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: 'var(--shadow-hover)' }}/>
                         <Bar dataKey="orders" name="Pedidos" radius={[4,4,0,0]} barSize={40}>
@@ -686,7 +688,7 @@ export default function App() {
                         <div key={rest.id} onClick={() => setSelectedRestaurantId(rest.id)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <MapPin size={14} color="var(--text-muted)"/>
-                            <span style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--brand-700)' }}>{rest.name.split(' ')[0]}</span>
+                            <span style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--brand-700)' }}>{(rest.name || 'Desconocido').split(' ')[0]}</span>
                           </div>
                           {renderTrend(rest.orders, rest.prevOrders ?? 0)}
                         </div>

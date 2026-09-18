@@ -203,7 +203,12 @@ export const fetchLiveStats = async (
       avgDeliveryTime: current.driverStats?.find((ds: DriverData) => ds.id === d.id)?.avgDeliveryTime ?? null,
     }));
 
-    return { totalOrders: current.totalOrders, restaurantStats, driverStats, orders: current.orders || [] };
+    const orders: OrderData[] = (current.orders || []).map((o: any) => ({
+      ...o,
+      timestamp: o.created_at || o.timestamp, // Mapear el created_at de la DB al timestamp del frontend
+    }));
+
+    return { totalOrders: current.totalOrders, restaurantStats, driverStats, orders };
   } catch {
     return null;
   }
