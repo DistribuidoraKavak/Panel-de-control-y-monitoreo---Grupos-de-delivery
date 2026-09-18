@@ -80,9 +80,15 @@ client.on('ready', async () => {
   console.log('✅ Cliente WhatsApp listo. Buscando grupos...\n');
 
   // Buscar los grupos configurados por nombre
-  const chats = await client.getChats();
-  let found = 0;
+  let chats = [];
+  try {
+    chats = await client.getChats();
+  } catch (err) {
+    console.warn('\n⚠️  No se pudieron cargar todos los chats al inicio debido a un cambio en WhatsApp Web.');
+    console.warn('   Los grupos se detectarán automáticamente cuando llegue el primer mensaje.\n');
+  }
 
+  let found = 0;
   for (const chat of chats) {
     if (!chat.isGroup) continue;
 
@@ -98,15 +104,15 @@ client.on('ready', async () => {
     }
   }
 
-  if (found === 0) {
-    console.warn('\n⚠️  No se encontró ningún grupo con los nombres configurados en .env');
-    console.warn('   Verificá que GROUP_RESTAURANTES y GROUP_COMUNIDAD están escritos exactamente igual al nombre del grupo en WhatsApp.\n');
-    console.warn('   Grupos disponibles en tu cuenta:');
-    chats.filter(c => c.isGroup).forEach(c => console.warn(`   - "${c.name}"`));
-  } else if (found < 2) {
-    console.warn('\n⚠️  Solo se encontró uno de los dos grupos. El otro no está monitoreado.\n');
-  } else {
-    console.log('\n🎯 Todos los grupos configurados fueron encontrados. Monitoreando...\n');
+  if (chats.length > 0) {
+    if (found === 0) {
+      console.warn('\n⚠️  No se encontró ningún grupo con los nombres configurados en .env');
+      console.warn('   Verificá que GROUP_RESTAURANTES y GROUP_COMUNIDAD están escritos exactamente igual al nombre del grupo en WhatsApp.\n');
+    } else if (found < 2) {
+      console.warn('\n⚠️  Solo se encontró uno de los dos grupos. El otro no está monitoreado.\n');
+    } else {
+      console.log('\n🎯 Todos los grupos configurados fueron encontrados. Monitoreando...\n');
+    }
   }
 });
 
@@ -121,6 +127,24 @@ client.on('disconnected', (reason) => {
 client.on('message', async (msg) => {
   // Ignorar mensajes propios (garantía extra de no-participación)
   if (msg.fromMe) return;
+
+  // Intentar detectar el grupo dinámicamente si no lo conocemos
+  if (!monitoredGroups[msg.from]) {
+    try {
+      const chat = await msg.getChat();
+      if (chat && chat.isGroup) {
+        if (GROUP_RESTAURANTES && chat.name === GROUP_RESTAURANTES) {
+          monitoredGroups[msg.from] = 'restaurantes';
+          console.log(`\n✅ Grupo RESTAURANTES detectado (vía mensaje): "${chat.name}"`);
+        } else if (GROUP_COMUNIDAD && chat.name === GROUP_COMUNIDAD) {
+          monitoredGroups[msg.from] = 'comunidad';
+          console.log(`\n✅ Grupo COMUNIDAD detectado (vía mensaje): "${chat.name}"`);
+        }
+      }
+    } catch (e) {
+      // Ignorar errores al buscar chat dinámicamente
+    }
+  }
 
   // Solo procesar mensajes de grupos monitoreados
   const groupType = monitoredGroups[msg.from];
@@ -156,19 +180,19 @@ app.get('/api/status', (req, res) => {
 app.get('/api/orders', (req, res) => {
   const since = req.query.since || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const until = req.query.until || new Date().toISOString();
-  const orders = stmts.getOrders.all({ since, until });
+  const orders = stmts.getOrders(since, until);
   res.json(orders);
 });
 
 // Repartidores
 app.get('/api/drivers', (req, res) => {
-  const drivers = stmts.getDrivers.all();
+  const drivers = stmts.getDrivers();
   res.json(drivers);
 });
 
 // Restaurantes
 app.get('/api/restaurants', (req, res) => {
-  const restaurants = stmts.getRestaurants.all();
+  const restaurants = stmts.getRestaurants();
   res.json(restaurants);
 });
 
@@ -176,13 +200,13 @@ app.get('/api/restaurants', (req, res) => {
 app.get('/api/events', (req, res) => {
   const since = req.query.since || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const limit = parseInt(req.query.limit || '200');
-  const events = stmts.getEvents.all({ since, limit });
+  const events = stmts.getEvents(since, limit);
   res.json(events);
 });
 
 // Respuestas de un pedido
 app.get('/api/orders/:orderId/responses', (req, res) => {
-  const responses = stmts.getOrderResponses.all({ order_id: req.params.orderId });
+  const responses = stmts.getOrderResponses ? stmts.getOrderResponses(req.params.orderId) : [];
   res.json(responses);
 });
 
@@ -191,9 +215,9 @@ app.get('/api/stats', (req, res) => {
   const since = req.query.since || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const until = req.query.until || new Date().toISOString();
 
-  const orders = stmts.getOrders.all({ since, until });
-  const drivers = stmts.getDrivers.all();
-  const restaurants = stmts.getRestaurants.all();
+  const orders = stmts.getOrders(since, until);
+  const drivers = stmts.getDrivers();
+  const restaurants = stmts.getRestaurants();
 
   // Agrupar pedidos por restaurante
   const byRestaurant = {};
