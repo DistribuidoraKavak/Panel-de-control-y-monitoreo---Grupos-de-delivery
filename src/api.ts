@@ -185,12 +185,20 @@ export const fetchLiveStats = async (
 
     // Enriquecer restaurantes con tendencia del período anterior
     const prevRestMap: Record<string, number> = {};
-    (prev.restaurantStats || []).forEach((r: RestaurantData) => prevRestMap[r.id] = r.orders);
+    (prev.restaurantStats || []).forEach((r: any) => {
+      const rId = r.restaurant?.id || r.id;
+      if (rId) prevRestMap[rId] = r.orders;
+    });
 
-    const restaurantStats: RestaurantData[] = (current.restaurantStats || []).map((r: RestaurantData) => {
-      const prevOrders = prevRestMap[r.id] || 0;
-      const trend = prevOrders === 0 ? (r.orders > 0 ? 100 : 0) : Math.round(((r.orders - prevOrders) / prevOrders) * 100);
-      return { ...r, prevOrders, trend, isInactive: r.orders === 0 && prevOrders > 0 };
+    const restaurantStats: RestaurantData[] = (current.restaurantStats || []).map((r: any) => {
+      const id = r.restaurant?.id || r.id;
+      const name = r.restaurant?.name || r.name;
+      const location = r.restaurant?.location || r.location;
+      const orders = r.orders;
+      
+      const prevOrders = prevRestMap[id] || 0;
+      const trend = prevOrders === 0 ? (orders > 0 ? 100 : 0) : Math.round(((orders - prevOrders) / prevOrders) * 100);
+      return { id, name, location, orders, prevOrders, trend, isInactive: orders === 0 && prevOrders > 0 };
     });
 
     // Enriquecer repartidores con datos de last_active de todos los conductores conocidos
