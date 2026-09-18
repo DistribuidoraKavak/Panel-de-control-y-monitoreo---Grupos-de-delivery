@@ -52,7 +52,10 @@ const client = new Client({
 
 // Estado de conexión
 let waStatus = 'disconnected';
-let monitoredGroups = {}; // { groupId: 'restaurantes' | 'comunidad' }
+let monitoredGroups = {
+  '120363412504783244@g.us': 'restaurantes',
+  '120363430049131718@g.us': 'comunidad'
+}; // { groupId: 'restaurantes' | 'comunidad' }
 
 client.on('qr', (qr) => {
   waStatus = 'waiting_qr';
