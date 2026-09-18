@@ -124,31 +124,47 @@ client.on('disconnected', (reason) => {
 });
 
 // ── Listener principal de mensajes ────────────────────────────────────────────
-client.on('message', async (msg) => {
-  // Ignorar mensajes propios (garantía extra de no-participación)
-  if (msg.fromMe) return;
-
+client.on('message_create', async (msg) => {
   // Intentar detectar el grupo dinámicamente si no lo conocemos
-  if (!monitoredGroups[msg.from]) {
+  if (!monitoredGroups[msg.from] && !monitoredGroups[msg.to]) {
+    const target = msg.fromMe ? msg.to : msg.from;
     try {
       const chat = await msg.getChat();
       if (chat && chat.isGroup) {
-        if (GROUP_RESTAURANTES && chat.name === GROUP_RESTAURANTES) {
-          monitoredGroups[msg.from] = 'restaurantes';
+        console.log(`[DEBUG] Recibido mensaje del grupo: "${chat.name}"`);
+        if (GROUP_RESTAURANTES && chat.name.trim() === GROUP_RESTAURANTES.trim()) {
+          monitoredGroups[target] = 'restaurantes';
           console.log(`\n✅ Grupo RESTAURANTES detectado (vía mensaje): "${chat.name}"`);
-        } else if (GROUP_COMUNIDAD && chat.name === GROUP_COMUNIDAD) {
-          monitoredGroups[msg.from] = 'comunidad';
+        } else if (GROUP_COMUNIDAD && chat.name.trim() === GROUP_COMUNIDAD.trim()) {
+          monitoredGroups[target] = 'comunidad';
           console.log(`\n✅ Grupo COMUNIDAD detectado (vía mensaje): "${chat.name}"`);
         }
+      } else {
+        console.log(`[DEBUG] Recibido mensaje de chat privado o desconocido: ${target}`);
       }
     } catch (e) {
-      // Ignorar errores al buscar chat dinámicamente
+      console.log(`[DEBUG] Error obteniendo chat para ${target}: ${e.message}`);
+      console.log(`[DEBUG] Mensaje recibido de ${target}: "${msg.body}"`);
+      
+      // AUTO-VINCULACIÓN POR COMANDO SECRETO
+      if (msg.body === 'TEST-REST') {
+        monitoredGroups[target] = 'restaurantes';
+        console.log(`\n✅ Grupo RESTAURANTES vinculado por comando a ID: ${target}`);
+      } else if (msg.body === 'TEST-COM') {
+        monitoredGroups[target] = 'comunidad';
+        console.log(`\n✅ Grupo COMUNIDAD vinculado por comando a ID: ${target}`);
+      }
     }
   }
 
+  // Ignorar mensajes propios (garantía extra de no-participación) después de la fase de descubrimiento
+  if (msg.fromMe) return;
+
   // Solo procesar mensajes de grupos monitoreados
   const groupType = monitoredGroups[msg.from];
-  if (!groupType) return;
+  if (!groupType) {
+    return;
+  }
 
   // Delegar al parser
   try {

@@ -54,7 +54,7 @@ async function processMessage(msg, groupType, logOnly) {
 
       if (!logOnly) {
         // Registrar el restaurante
-        stmts.upsertRestaurant.run({
+        stmts.upsertRestaurant({
           id: senderId,
           name: senderName,
           phone: senderId.split('@')[0],
@@ -65,7 +65,7 @@ async function processMessage(msg, groupType, logOnly) {
 
         // Crear el pedido
         const orderId = generateOrderId();
-        stmts.insertOrder.run({
+        stmts.insertOrder({
           id: orderId,
           restaurant_id: senderId,
           created_at: timestamp,
@@ -86,7 +86,7 @@ async function processMessage(msg, groupType, logOnly) {
 
       if (!logOnly) {
         // Registrar el repartidor
-        stmts.upsertDriver.run({
+        stmts.upsertDriver({
           id: senderId,
           name: senderName,
           phone: senderId.split('@')[0],
@@ -95,21 +95,17 @@ async function processMessage(msg, groupType, logOnly) {
         });
 
         // Buscar el pedido pendiente más reciente
-        const pendingOrder = stmts.getLastPendingOrder.get();
+        const pendingOrder = stmts.getLastPendingOrder();
         if (pendingOrder) {
           // Verificar si ya respondió antes (evitar duplicados)
-          const existingResp = stmts.db?.prepare(
-            'SELECT id FROM order_responses WHERE order_id = ? AND driver_id = ?'
-          ).get(pendingOrder.id, senderId);
+          const existingResp = stmts.getResponseForOrderDriver(pendingOrder.id, senderId);
 
           if (!existingResp) {
             // ¿Es el primero? → ganador potencial
-            const prevResponses = stmts.db?.prepare(
-              'SELECT COUNT(*) as cnt FROM order_responses WHERE order_id = ?'
-            ).get(pendingOrder.id);
+            const prevResponses = stmts.countResponsesForOrder(pendingOrder.id);
             const isFirst = (prevResponses?.cnt || 0) === 0;
 
-            stmts.insertResponse.run({
+            stmts.insertResponse({
               order_id: pendingOrder.id,
               driver_id: senderId,
               responded_at: timestamp,
@@ -118,7 +114,7 @@ async function processMessage(msg, groupType, logOnly) {
 
             if (isFirst) {
               // Asignar provisionalmente al primer "yo"
-              stmts.assignOrder.run({
+              stmts.assignOrder({
                 id: pendingOrder.id,
                 driver_id: senderId,
                 assigned_at: timestamp,
@@ -142,7 +138,7 @@ async function processMessage(msg, groupType, logOnly) {
       logEvent('dale', groupType, msg.from, senderId, senderName, body, timestamp, msg);
 
       if (!logOnly) {
-        const assignedOrder = stmts.getLastAssignedOrder.get();
+        const assignedOrder = stmts.getLastAssignedOrder();
         if (assignedOrder) {
           console.log(`[DALE] Admin ${senderName || senderId} confirmó pedido ${assignedOrder.id}`);
           // El pedido ya fue asignado al primer "yo", el "dale" confirma
@@ -159,9 +155,9 @@ async function processMessage(msg, groupType, logOnly) {
       logEvent('location', groupType, msg.from, senderId, senderName, '[location]', timestamp, msg);
 
       if (!logOnly) {
-        const assignedOrder = stmts.getLastAssignedOrder.get();
+        const assignedOrder = stmts.getLastAssignedOrder();
         if (assignedOrder) {
-          stmts.dispatchOrder.run({ id: assignedOrder.id, dispatched_at: timestamp });
+          stmts.dispatchOrder({ id: assignedOrder.id, dispatched_at: timestamp });
           console.log(`[UBICACIÓN] Pedido ${assignedOrder.id} → en camino`);
         }
       } else {
@@ -175,11 +171,9 @@ async function processMessage(msg, groupType, logOnly) {
     if (msg.type === 'chat' && RE_ENTREGADO.test(body)) {
       logEvent('delivery_signal', groupType, msg.from, senderId, senderName, body, timestamp, msg);
       if (!logOnly) {
-        const dispatchedOrder = stmts.db?.prepare(
-          "SELECT * FROM orders WHERE status = 'dispatched' ORDER BY dispatched_at DESC LIMIT 1"
-        ).get();
+        const dispatchedOrder = stmts.getLastDispatchedOrder();
         if (dispatchedOrder) {
-          stmts.completeOrder.run({ id: dispatchedOrder.id, completed_at: timestamp });
+          stmts.completeOrder({ id: dispatchedOrder.id, completed_at: timestamp });
           console.log(`[COMPLETADO] Pedido ${dispatchedOrder.id}`);
         }
       }
@@ -196,7 +190,7 @@ async function processMessage(msg, groupType, logOnly) {
       logEvent('activity_signal', groupType, msg.from, senderId, senderName, body, timestamp, msg);
 
       if (!logOnly && signalType === 'activo') {
-        stmts.upsertDriver.run({
+        stmts.upsertDriver({
           id: senderId,
           name: senderName,
           phone: senderId.split('@')[0],
@@ -215,7 +209,7 @@ async function processMessage(msg, groupType, logOnly) {
 
 function logEvent(eventType, groupType, groupId, senderId, senderName, body, timestamp, msg) {
   try {
-    stmts.insertEvent.run({
+    stmts.insertEvent({
       event_type: eventType,
       group_type: groupType,
       group_id: groupId,
