@@ -65,14 +65,10 @@ async function processMessage(msg, groupType, logOnly) {
     // Detección de "Nuevo Pedido" (Cualquier mensaje no-comando de alguien que no es repartidor conocido)
     let isNewOrder = false;
     if (!isYo && !isConfirm && !isDelivery && msg.type !== 'location') {
-      if (msg.type === 'sticker' || msg.type === 'image') {
-        isNewOrder = true;
-      } else if (msg.type === 'chat') {
-        // Si ya es un restaurante conocido o es alguien nuevo (asumimos restaurante por defecto)
-        if (knownRestaurant || !knownDriver) {
-          isNewOrder = true;
-        }
-      }
+      // Todo mensaje (sticker, imagen o texto) que no sea un comando explícito 
+      // se considera un nuevo pedido. Esto permite que cualquier persona actúe 
+      // como restaurante sin depender de roles fijos o historial.
+      isNewOrder = true;
     }
 
     // 1. NUEVO PEDIDO

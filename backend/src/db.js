@@ -231,6 +231,15 @@ const stmts = {
   ),
 
   getLastDispatchedOrder: () => get(`SELECT * FROM orders WHERE status='dispatched' ORDER BY dispatched_at DESC LIMIT 1`),
+
+  clearDatabase: () => {
+    run(`DELETE FROM orders`);
+    run(`DELETE FROM order_responses`);
+    run(`DELETE FROM events`);
+    run(`DELETE FROM drivers`);
+    run(`DELETE FROM restaurants`);
+    run(`DELETE FROM driver_sessions`);
+  },
 };
 
 module.exports = { initDb, stmts };

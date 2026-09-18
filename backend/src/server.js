@@ -185,6 +185,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+app.post('/api/clear', (req, res) => {
+  stmts.clearDatabase();
+  console.log('[API] Base de datos limpiada para pruebas.');
+  res.json({ success: true, message: 'Base de datos limpiada correctamente.' });
+});
+
 // Estado del sistema
 app.get('/api/status', (req, res) => {
   res.json({
