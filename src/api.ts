@@ -46,6 +46,7 @@ export interface OrderData {
 
 export interface StatsResponse {
   totalOrders: number;
+  prevTotalOrders?: number;
   restaurantStats: RestaurantData[];
   driverStats: DriverData[];
   orders: OrderData[];
@@ -160,7 +161,7 @@ export const fetchDemoStats = (startDate: Date, endDate: Date, prevStartDate: Da
     deliveryTimeMinutes: o.deliveryTimeMinutes,
   }));
 
-  return { totalOrders: inRange.length, restaurantStats, driverStats, orders };
+  return { totalOrders: inRange.length, prevTotalOrders: inPrevRange.length, restaurantStats, driverStats, orders };
 };
 
 // ── LIVE DATA (backend API) ───────────────────────────────────────────────────
@@ -216,7 +217,7 @@ export const fetchLiveStats = async (
       timestamp: o.created_at || o.timestamp, // Mapear el created_at de la DB al timestamp del frontend
     }));
 
-    return { totalOrders: current.totalOrders, restaurantStats, driverStats, orders };
+    return { totalOrders: current.totalOrders, prevTotalOrders: prev.totalOrders, restaurantStats, driverStats, orders };
   } catch {
     return null;
   }

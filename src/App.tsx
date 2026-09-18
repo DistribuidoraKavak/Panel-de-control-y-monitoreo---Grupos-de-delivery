@@ -121,7 +121,7 @@ export default function App() {
   // ── Toggle data source ─────────────────────────────────────────────────────
   const toggleDataSource = () => {
     const next: DataSource = dataSource === 'demo' ? 'live' : 'demo';
-    setDataSource(next);
+    setDataSource(next); // Saves to localStorage via api.ts
     setDataSourceState(next);
     setLiveStats(null);
     setLiveError(false);
@@ -173,12 +173,7 @@ export default function App() {
     needsAlert: differenceInDays(now, new Date(d.last_active)) >= 4,
   }));
 
-  const prevTotalOrders = (() => {
-    if (dataSource === 'demo') {
-      return fetchDemoStats(prevStartDate, prevEndDate, prevStartDate, prevEndDate).totalOrders;
-    }
-    return 0; // live mode handles this inside fetchLiveStats
-  })();
+  const prevTotalOrders = activeStats?.prevTotalOrders ?? 0;
 
   const prevActiveDriversCount = 0; // best-effort, see api.ts for live handling
   const activeDriversCount = driverStats.filter(d => !d.needsAlert).length;
