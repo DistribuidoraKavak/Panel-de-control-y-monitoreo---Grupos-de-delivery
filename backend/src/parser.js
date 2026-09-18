@@ -168,25 +168,43 @@ async function processMessage(msg, groupType, logOnly) {
 
   // ── GRUPO COMUNIDAD ────────────────────────────────────────────────────────
   if (groupType === 'comunidad') {
+    if (msg.type !== 'chat') return; // Ignorar ubicaciones, stickers o multimedia aquí
     const body = cleanText(msg.body || '');
-    const RE_ACTIVO = /\b(activo|disponible|conecto|conectado|estoy|arranco|listo)\b/i;
-    const RE_INACTIVO = /\b(inactivo|no estoy|descans|me voy|ya fue|corto|salgo|hasta)\b/i;
+    const bodyLower = body.toLowerCase();
 
-    if (msg.type === 'chat' && (RE_ACTIVO.test(body) || RE_INACTIVO.test(body))) {
-      const signalType = RE_ACTIVO.test(body) ? 'activo' : 'inactivo';
+    // 1. Cambio de turno de administradores
+    const isShiftChange = /(termina|acaba)\s+(el\s+)?turno/i.test(bodyLower) && /(comienza|empieza)\s+(el\s+)?(mio|mío)/i.test(bodyLower);
+    if (isShiftChange) {
+      logEvent('admin_shift', groupType, msg.from, senderId, senderName, body, timestamp, msg);
+      if (!logOnly) console.log(`[TURNO ADMIN] ${senderName || senderId} inició su turno como administrador.`);
+      return;
+    }
+
+    // Ignorar si es una pregunta general o charlatanería obvia (quienes activos?, alguien para...?)
+    if (bodyLower.includes('quienes') || bodyLower.includes('alguien') || bodyLower.includes('?')) return;
+
+    // 2. Señales de actividad/inactividad en 1ra persona
+    const RE_ACTIVO = /\b(?:yo\s+|me\s+)?(reactiv[oa]+|activ[oa]+|conect[oa]+|disponible)\b(?!s)/i;
+    const RE_INACTIVO = /\b(?:yo\s+|me\s+)?(desactiv[oa]+|desconect[oa]+|desenchuf[oa]+|a\s+mimir|descansar)\b(?!s)/i;
+    const RE_THIRD_PERSON = /\b(?:le|te|se|quien)\s+(reactiv[oa]+|activ[oa]+|conect[oa]+|desactiv[oa]+|desconect[oa]+)\b/i;
+
+    if (RE_THIRD_PERSON.test(bodyLower)) return; // Ignorar "le activo" o "se activa"
+
+    let signalType = null;
+    if (RE_ACTIVO.test(bodyLower)) signalType = 'activo';
+    else if (RE_INACTIVO.test(bodyLower)) signalType = 'inactivo';
+
+    if (signalType) {
       logEvent('activity_signal', groupType, msg.from, senderId, senderName, body, timestamp, msg);
-
-      if (!logOnly && signalType === 'activo') {
-        stmts.upsertDriver({
-          id: senderId,
-          name: senderName,
-          phone: senderId.split('@')[0],
-          last_active: timestamp,
-          first_seen: timestamp,
-        });
-        console.log(`[ACTIVO] ${senderName || senderId} se marcó como ${signalType}`);
-      } else {
-        console.log(`[LOG] ${signalType.toUpperCase()} de ${senderName || senderId}: "${body}"`);
+      if (!logOnly) {
+        stmts.upsertDriver({ id: senderId, name: senderName, phone: senderId.split('@')[0], last_active: timestamp, first_seen: timestamp });
+        
+        if (signalType === 'activo') {
+          stmts.startDriverSession(senderId, timestamp);
+        } else {
+          stmts.endDriverSession(senderId, timestamp);
+        }
+        console.log(`[${signalType.toUpperCase()}] ${senderName || senderId} (Sesión ${signalType === 'activo' ? 'iniciada' : 'cerrada'})`);
       }
     }
   }

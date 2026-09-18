@@ -265,6 +265,30 @@ app.get('/api/stats', (req, res) => {
     if (o.delivery_time_minutes) byDriver[o.driver_id].deliveryTimes.push(o.delivery_time_minutes);
   });
 
+  const driverSessions = stmts.getDriverSessions(since, until);
+  const sessionDurations = {}; // driver_id -> minutes
+  
+  driverSessions.forEach(s => {
+      const start = new Date(s.start_time).getTime();
+      let end = s.end_time ? new Date(s.end_time).getTime() : Date.now();
+      // Cap at end of 'until'
+      const untilTime = new Date(until).getTime();
+      if (end > untilTime) end = untilTime;
+      // Cap max open session to 8 hours if no end_time
+      if (!s.end_time && end - start > 8 * 60 * 60 * 1000) {
+         end = start + 8 * 60 * 60 * 1000;
+      }
+      
+      const mins = Math.max(0, Math.round((end - start) / 60000));
+      if (!sessionDurations[s.driver_id]) sessionDurations[s.driver_id] = 0;
+      sessionDurations[s.driver_id] += mins;
+  });
+
+  // Enrich all drivers with active time
+  drivers.forEach(d => {
+     d.activeTimeMinutes = sessionDurations[d.id] || 0;
+  });
+
   const driverStats = Object.values(byDriver).map(d => ({
     ...d.driver,
     orders: d.orders,

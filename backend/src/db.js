@@ -59,6 +59,13 @@ const SCHEMA = `
     won         INTEGER DEFAULT 0
   );
 
+  CREATE TABLE IF NOT EXISTS driver_sessions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    driver_id   TEXT NOT NULL,
+    start_time  TEXT NOT NULL,
+    end_time    TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS events (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     event_type  TEXT NOT NULL,
@@ -187,6 +194,18 @@ const stmts = {
   getOldestAssignedOrderForDriver: (driverId) => get(`SELECT * FROM orders WHERE status='assigned' AND driver_id=:did ORDER BY assigned_at ASC LIMIT 1`, { ':did': driverId }),
   getDriver: (id) => get(`SELECT * FROM drivers WHERE id=:id`, { ':id': id }),
   getRestaurant: (id) => get(`SELECT * FROM restaurants WHERE id=:id`, { ':id': id }),
+
+  startDriverSession: (driverId, startTime) => {
+    // End any open sessions first
+    run(`UPDATE driver_sessions SET end_time=:time WHERE driver_id=:id AND end_time IS NULL`, { ':id': driverId, ':time': startTime });
+    run(`INSERT INTO driver_sessions (driver_id, start_time) VALUES (:id, :time)`, { ':id': driverId, ':time': startTime });
+  },
+  endDriverSession: (driverId, endTime) => {
+    run(`UPDATE driver_sessions SET end_time=:time WHERE driver_id=:id AND end_time IS NULL`, { ':id': driverId, ':time': endTime });
+  },
+  getDriverSessions: (since, until) => all(`
+    SELECT * FROM driver_sessions WHERE start_time >= :since AND start_time <= :until
+  `, { ':since': since, ':until': until }),
 
   // Queries de consulta para la API
   getOrders: (since, until) => all(`

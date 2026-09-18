@@ -23,6 +23,7 @@ export interface DriverData {
   last_active: string; // ISO string
   orders: number;
   avgDeliveryTime: number | null;
+  activeTimeMinutes?: number;
 }
 
 export interface RestaurantData {
@@ -210,6 +211,7 @@ export const fetchLiveStats = async (
       ...d,
       orders: driverStatsMap[d.id] || 0,
       avgDeliveryTime: current.driverStats?.find((ds: DriverData) => ds.id === d.id)?.avgDeliveryTime ?? null,
+      activeTimeMinutes: d.activeTimeMinutes ?? 0,
     }));
 
     const orders: OrderData[] = (current.orders || []).map((o: any) => ({

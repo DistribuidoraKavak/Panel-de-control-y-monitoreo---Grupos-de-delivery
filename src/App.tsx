@@ -220,6 +220,7 @@ export default function App() {
       else if (sortField === 'orders') { valA = a.orders; valB = b.orders; }
       else if (sortField === 'lastActive') { valA = new Date(a.last_active).getTime(); valB = new Date(b.last_active).getTime(); }
       else if (sortField === 'avgTime') { valA = a.avgDeliveryTime ?? 9999; valB = b.avgDeliveryTime ?? 9999; }
+      else if (sortField === 'activeTime') { valA = a.activeTimeMinutes ?? 0; valB = b.activeTimeMinutes ?? 0; }
       else { // status
         if (a.needsAlert !== b.needsAlert) return sortAsc ? (a.needsAlert ? 1 : -1) : (a.needsAlert ? -1 : 1);
         valA = a.orders; valB = b.orders;
@@ -733,13 +734,14 @@ export default function App() {
                         <th>Contacto</th>
                         <th style={{ cursor: 'pointer' }} onClick={() => handleSort('orders')}><div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>Pedidos <SortIcon field="orders"/></div></th>
                         <th style={{ cursor: 'pointer' }} onClick={() => handleSort('avgTime')}><div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Timer size={14}/> Prom. entrega <SortIcon field="avgTime"/></div></th>
+                        <th style={{ cursor: 'pointer' }} onClick={() => handleSort('activeTime')}><div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Clock size={14}/> Tiempo Activo <SortIcon field="activeTime"/></div></th>
                         <th style={{ cursor: 'pointer' }} onClick={() => handleSort('lastActive')}><div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>Última Actividad <SortIcon field="lastActive"/></div></th>
                         <th style={{ cursor: 'pointer' }} onClick={() => handleSort('status')}><div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>Estado <SortIcon field="status"/></div></th>
                       </tr>
                     </thead>
                     <tbody>
                       {displayDrivers.length === 0 ? (
-                        <tr><td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>No se encontraron resultados.</td></tr>
+                        <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>No se encontraron resultados.</td></tr>
                       ) : displayDrivers.map(driver => {
                         const { initials, color } = getAvatarConfig(driver.name, driver.id);
                         return (
@@ -753,6 +755,11 @@ export default function App() {
                                   <Timer size={14} color="var(--text-muted)"/>{driver.avgDeliveryTime} min
                                 </span>
                               ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                            </td>
+                            <td>
+                              <span style={{ fontWeight: 500 }}>
+                                {driver.activeTimeMinutes ? `${Math.floor(driver.activeTimeMinutes / 60)}h ${driver.activeTimeMinutes % 60}m` : '0h 0m'}
+                              </span>
                             </td>
                             <td>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: driver.needsAlert ? 'var(--status-danger)' : 'var(--text-body)' }}>
